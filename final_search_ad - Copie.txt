@@ -1,4 +1,41 @@
-﻿$PSDefaultParameterValues['Out-File:Width'] = 1000
+$PSDefaultParameterValues['Out-File:Width'] = 1000
+
+# Fonction pour sauvegarder de nouveaux identifiants
+function Save-NewCredential {
+    $credential = Get-Credential -Message "Entrez vos identifiants AD"
+    $credential.Password | ConvertFrom-SecureString | Out-File $credPath
+    $credential.UserName | Out-File $userPath
+    Write-Host "Les identifiants ont été enregistrés dans $credPath"
+    return $credential
+}
+
+# Chemin de stockage des identifiants AD
+$credPath = Join-Path -Path $PSScriptRoot -ChildPath "ad_credentials.secure"
+$userPath = Join-Path -Path $PSScriptRoot -ChildPath "ad_username.txt"
+
+# Fonction pour récupérer les identifiants sauvegardés
+function Get-SavedCredential {
+    if ((Test-Path $credPath) -and (Test-Path $userPath)) {
+        $username = Get-Content $userPath
+        $password = Get-Content $credPath | ConvertTo-SecureString
+        return New-Object System.Management.Automation.PSCredential ($username, $password)
+    } else {
+        Write-Host "Aucun identifiant enregistré. Veuillez entrer vos identifiants AD."
+        return Save-NewCredential
+    }
+}
+
+# Fonction pour sauvegarder de nouveaux identifiants
+function Save-NewCredential {
+    $credential = Get-Credential -Message "Entrez vos identifiants AD"
+    $credential.Password | ConvertFrom-SecureString | Out-File $credPath
+    $credential.UserName | Out-File $userPath
+    Write-Host "Les identifiants ont été enregistrés dans $credPath"
+    return $credential
+}
+
+# Charger automatiquement les credentials
+$global:ADCredential = Get-SavedCredential
 
 function Export-Results {
     param(
@@ -35,7 +72,7 @@ function finduserad {
     )
 
     # Récupérer les comptes AD correspondant au SamAccountName fourni
-    $accounts = Get-ADUser -Server ebp.local -Properties description, mail -Filter {SamAccountName -eq $fonctionuserad}
+    $accounts = Get-ADUser -Credential $global:ADCredential -Server BTSSIOBASCAN.local -Properties description, mail -Filter {SamAccountName -eq $fonctionuserad}
 
     # Vérifier si aucun utilisateur n'a été trouvé
     if (-not $accounts) {
@@ -46,10 +83,12 @@ function finduserad {
     $results = @()
 
     foreach ($account in $accounts) {
-        $memberOf = Get-ADUser $account -Properties MemberOf |
-                    Select-Object -ExpandProperty MemberOf |
-                    Get-ADGroup |
-                    Select-Object -ExpandProperty Name
+    $memberOf = Get-ADUser $account -Properties MemberOf |
+                Select-Object -ExpandProperty MemberOf |
+                ForEach-Object { ($_ -split ',')[0] -replace 'CN=' } # Extrait seulement le nom du groupe
+
+    Write-Host "L'utilisateur $account appartient aux groupes suivants : $($memberOf -join ', ')"
+
 
         $results += [PSCustomObject]@{
             Name          = $account.Name
@@ -71,7 +110,7 @@ function findgroupad {
     )
 
     # Récupérer les groupes AD correspondant au filtre fourni
-    $groups = Get-ADGroup -Server ebp.local -Filter {Name -like $fonctiongroupad}
+    $groups = Get-ADGroup -Credential $global:ADCredential -Server BTSSIOBASCAN.local -Filter {Name -like $fonctiongroupad}
 
     # Vérifier si aucun groupe n'a été trouvé
     if (-not $groups) {
@@ -102,7 +141,7 @@ function findexpirpwd {
         [System.Windows.Forms.TextBox]$resultTextBox
     )
 
-    $user = Get-ADUser -Identity $fonctionexpirpwd -Properties "msDS-UserPasswordExpiryTimeComputed"
+    $user = Get-ADUser -Credential $global:ADCredential -Identity $fonctionexpirpwd -Properties "msDS-UserPasswordExpiryTimeComputed"
     if (-not $user) {
         $resultTextBox.Text = "Utilisateur $fonctionexpirpwd introuvable."
         return
@@ -132,7 +171,7 @@ function FindInactiveUsers {
 
     $thresholdDate = (Get-Date).AddDays(-$DaysInactive).ToFileTime()
 
-    $inactiveUsers = Get-ADUser -Filter {LastLogonTimestamp -lt $thresholdDate} -Properties LastLogonTimestamp |
+    $inactiveUsers = Get-ADUser -Credential $global:ADCredential -Filter {LastLogonTimestamp -lt $thresholdDate} -Properties LastLogonTimestamp |
                      ForEach-Object {
                          [PSCustomObject]@{
                              Name           = $_.Name
@@ -149,61 +188,50 @@ function FindInactiveUsers {
     $resultTextBox.Text = $resultsText
 }
 
-function FindDisabledAccounts {
-    param(
-        [System.Windows.Forms.TextBox]$resultTextBox
-    )
-
-    $disabledAccounts = Get-ADUser -Filter {Enabled -eq $false} -Properties DisplayName, Mail |
-                        ForEach-Object {
-                            [PSCustomObject]@{
-                                Name           = $_.Name
-                                SamAccountName = $_.SamAccountName
-                                DisplayName    = $_.DisplayName
-                                Email          = $_.Mail
-                            }
-                        }
-
-    $resultsText = $disabledAccounts | Format-Table -AutoSize | Out-String
-    $resultTextBox.Text = $resultsText
-}
-
 function FindComputers {
     param(
         [string]$ComputerName,
         [System.Windows.Forms.TextBox]$resultTextBox
     )
 
-    $computers = Get-ADComputer -Filter {Name -eq $ComputerName} -Properties OperatingSystem, LastLogonDate
+    # Si $ComputerName est vide, on récupère tous les ordinateurs
+    if ($ComputerName -eq "all"){
+        # Récupérer uniquement les noms des ordinateurs
+        $computers = Get-ADComputer -Credential $global:ADCredential -Filter * | Select-Object -ExpandProperty Name
+        
+        # Vérifier si des ordinateurs ont été trouvés
+        if ($computers.Count -eq 0) {
+            $resultTextBox.Text = "Aucun ordinateur trouvé dans l'AD."
+            return
+        }
 
-    if (-not $computers) {
-        $resultTextBox.Text = "Aucun ordinateur trouvé avec le nom $ComputerName"
-        return
+        # Joindre les noms des ordinateurs avec une virgule
+        $resultTextBox.Text = $computers -join ", "
+    } else {
+        # Sinon, on cherche spécifiquement l'ordinateur par son nom
+        $computer = Get-ADComputer -Credential $global:ADCredential -Filter "Name -eq '$ComputerName'" -Properties OperatingSystem, LastLogonDate
+        
+        # Vérifier si l'ordinateur a été trouvé
+        if (-not $computer) {
+            $resultTextBox.Text = "Aucun ordinateur trouvé avec le nom '$ComputerName'."
+            return
+        }
+
+        # Afficher les détails de l'ordinateur trouvé
+        $resultTextBox.Text = "Nom: $($computer.Name), Système d'exploitation: $($computer.OperatingSystem), Dernière connexion: $($computer.LastLogonDate)"
     }
-
-    $results = $computers |
-               ForEach-Object {
-                   [PSCustomObject]@{
-                       Name            = $_.Name
-                       OperatingSystem = $_.OperatingSystem
-                       LastLogonDate   = if ($_.LastLogonDate) {
-                           $_.LastLogonDate
-                       } else {
-                           "Jamais connecté"
-                       }
-                   }
-               }
-
-    $resultsText = $results | Format-Table -AutoSize | Out-String
-    $resultTextBox.Text = $resultsText
 }
+
+
+
+
 
 function FindUsersWithNonExpiringPasswords {
     param(
         [System.Windows.Forms.TextBox]$resultTextBox
     )
 
-    $nonExpiringUsers = Get-ADUser -Filter {PasswordNeverExpires -eq $true} -Properties DisplayName, Mail |
+    $nonExpiringUsers = Get-ADUser -Credential $global:ADCredential -Filter {PasswordNeverExpires -eq $true} -Properties DisplayName, Mail |
                         ForEach-Object {
                             [PSCustomObject]@{
                                 Name          = $_.Name
@@ -216,6 +244,29 @@ function FindUsersWithNonExpiringPasswords {
     $resultsText = $nonExpiringUsers | Format-Table -AutoSize | Out-String
     $resultTextBox.Text = $resultsText
 }
+
+function ad_group_search {
+    param(
+        [System.Windows.Forms.TextBox]$resultTextBox
+    )
+
+    # Récupérer tous les groupes AD sans filtre explicite
+    $groups = Get-ADGroup -Credential $global:ADCredential -Server BTSSIOBASCAN.local -Filter *
+
+    # Vérifier si aucun groupe n'a été trouvé
+    if (-not $groups) {
+        $resultTextBox.Text = "Erreur : Aucun groupe trouvé dans l'Active Directory."
+        return
+    }
+
+    # Extraire les noms des groupes
+    $groupNames = $groups | Select-Object -ExpandProperty Name
+
+    # Afficher les résultats dans le TextBox
+    $resultsText = $groupNames -join ", "
+    $resultTextBox.Text = $resultsText
+}
+
 
 # Interface graphique complète
 Add-Type -AssemblyName System.Windows.Forms
@@ -271,12 +322,16 @@ AddButton "5 - Recherche Comptes Désactivés" 400 450 {
 }
 
 AddButton "6 - Recherche Ordinateur" 400 500 { 
-    $computer = ShowInputBox "Entrez le nom de l'ordinateur" "Recherche Ordinateur"
+    $computer = ShowInputBox "Entrez le nom de l'ordinateur ou ALL pour tous les pc" "Recherche Ordinateur"
     if ($computer) { FindComputers -ComputerName $computer -resultTextBox $resultTextBox }
 }
 
 AddButton "7 - Recherche Comptes Sans Expiration" 400 550 { 
     FindUsersWithNonExpiringPasswords -resultTextBox $resultTextBox
+}
+
+AddButton "8 - Liste Groupes AD" 400 600 { 
+    ad_group_search -resultTextBox $resultTextBox
 }
 
 # Ajouter un bouton Quitter
