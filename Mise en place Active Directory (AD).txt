@@ -1,0 +1,54 @@
+Monter un **Active Directory (AD)** implique l'installation et la configuration d'un contrôleur de domaine sous **Windows Server**. Voici les étapes principales :
+
+---
+
+### **1. Préparation**
+- Avoir une machine avec **Windows Server** (2016, 2019 ou 2022).
+- Assurez-vous d’avoir un **nom de domaine** unique (ex: `mondomaine.local`).
+- Vérifiez que l'adresse IP est **statique** et non en DHCP.
+
+---
+
+### **2. Installation du rôle Active Directory**
+1. **Ouvrir le Gestionnaire de serveur**.
+2. Aller dans **Gérer** > **Ajouter des rôles et fonctionnalités**.
+3. Choisissez **Installation basée sur un rôle ou une fonctionnalité**.
+4. Sélectionnez le serveur concerné.
+5. Dans les rôles, cochez **Services AD DS (Active Directory Domain Services)**.
+6. Acceptez les fonctionnalités supplémentaires demandées.
+7. Cliquez sur **Suivant** jusqu’à l’installation.
+
+---
+
+### **3. Promotion en contrôleur de domaine**
+1. Après l’installation, cliquez sur **Promouvoir ce serveur en contrôleur de domaine**.
+2. Choisissez **Ajouter une nouvelle forêt** et entrez le **nom de domaine** (ex: `mondomaine.local`).
+3. Configurez le niveau fonctionnel de la forêt et du domaine (**Windows Server 2016+ recommandé**).
+4. Définissez un **mot de passe** pour le mode de restauration des services d’annuaire (DSRM).
+5. Validez les options DNS et NetBIOS (laisser par défaut sauf besoin spécifique).
+6. Vérifiez le chemin des bases de données AD.
+7. Lancez l'installation et redémarrez le serveur.
+
+---
+
+### **4. Vérification et configuration**
+Après redémarrage :
+- Ouvrir **Outils d’administration** > **Utilisateurs et ordinateurs Active Directory** pour gérer les comptes et groupes.
+- Vérifiez que la commande `dcdiag` dans PowerShell retourne **aucune erreur**.
+- Ajoutez des **stations clientes** en les joignant au domaine via `Panneau de configuration > Système > Modifier les paramètres > Domaine`.
+
+---
+
+### **5. Configuration supplémentaire (optionnel)**
+- **GPO (Group Policy Object)** : Définir des stratégies pour les utilisateurs et machines.
+- **DHCP & DNS** : Configurer correctement les services réseaux pour que le domaine fonctionne sans erreur.
+- **Réplication** : Ajouter un second contrôleur de domaine pour la haute disponibilité.
+
+---
+
+Création OU (unité d'organisation) pour séparer les utilisateurs en fonction de leur niveau d'étude et classe.
+Mise en place de GPO pour :
+- Expiration mot de passe au bout de 6 mois.
+- Prévenir l'utilisateur qu'il va expirer 30j avant
+- 8 caractères minimum avec caractères spéciaux, chiffres, majuscules.
+- bloquer un compte au bout de 10 tentatives infractueuses de mot de passe.

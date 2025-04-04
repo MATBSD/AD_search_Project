@@ -1,0 +1,85 @@
+### Fiche Technique : Script PowerShell pour Interface Graphique de Recherche AD avec Exportation (Format TXT)
+
+---
+
+#### **Nom du Projet :**
+Création d'un script PowerShell avec interface graphique pour effectuer des recherches dans Active Directory (AD) et exporter les résultats au format TXT.
+
+---
+
+#### **Objectif du Projet :**
+Développer un script PowerShell avec une interface graphique permettant de réaliser des recherches dans Active Directory (AD) et d'exporter les résultats au format TXT pour une utilisation ultérieure.
+
+---
+
+#### **Technologies Utilisées :**
+- **PowerShell** : Langage principal pour le développement du script.
+- **Windows Forms** : Technologie pour créer l'interface graphique de l'application.
+- **Active Directory Module for PowerShell** : Permet d'exécuter des requêtes dans Active Directory pour obtenir des informations sur les utilisateurs.
+- **Format TXT** : Utilisation du format texte (.txt) pour l'exportation des résultats.
+
+---
+
+#### **Fonctionnalités Principales :**
+
+1. **Interface Graphique** :
+   - Interface simple permettant à l'utilisateur de saisir des critères de recherche.
+   - Utilisation d'un champ de recherche où l'utilisateur peut entrer des informations.
+   - Affichage des résultats sous forme de tableau dans l'interface graphique pour une visualisation immédiate des données.
+
+2. **Recherche dans Active Directory (AD)** :
+   - Exécution de requêtes sur les attributs des utilisateurs AD tels que le nom, le prénom, l'email.
+   - Filtrage des résultats selon les valeurs saisies dans l'interface graphique.
+   - Affichage dynamique des résultats.
+
+3. **Exportation des Résultats au Format TXT** :
+   - Possibilité d'exporter les résultats de la recherche dans un fichier texte (.txt).
+   - Format d'exportation structuré (par exemple : un utilisateur par ligne, avec des attributs séparés par un séparateur comme une tabulation ou une virgule).
+   - Option de sélection du chemin de destination où le fichier TXT sera enregistré.
+
+4. **Sécurité et Validation** :
+   - Vérification des permissions nécessaires pour interroger Active Directory.
+   - Validation des champs saisis pour garantir que les critères de recherche sont valides et éviter les erreurs d'exécution.
+   - Gestion des erreurs d'exécution (par exemple, absence de connexion à AD ou absence de résultats) avec des messages d'erreur dans l'interface.
+
+---
+
+#### **Détails Techniques :**
+
+- **Interface Utilisateur** :
+   - Utilisation de **Windows Forms** pour créer l'interface graphique : des champs de texte pour saisir les critères de recherche.
+   - Affichage des résultats sous forme de tableau.
+  
+- **Recherche Active Directory** :
+   - Le script utilise le **module Active Directory** pour effectuer des requêtes basées sur les critères spécifiés.
+   - Exécution de commandes PowerShell telles que `Get-ADUser` pour récupérer les informations sur les utilisateurs en fonction des filtres saisis par l'utilisateur dans l'interface.
+   
+- **Exportation des Résultats en Format TXT** :
+   - Une fois la recherche terminée, les résultats sont formatés et écrits dans un fichier texte.
+   - Chaque utilisateur est exporté sur une ligne avec ses attributs séparés par un caractère de délimitation (tabulation, point-virgule, etc.).
+   - Le chemin d'exportation est sélectionné par l'utilisateur à travers une boîte de dialogue.
+
+#### **Livrables :**
+1. **Script PowerShell (.ps1)** :
+   - Le fichier script PowerShell contenant toute la logique pour interagir avec Active Directory, l'interface graphique, et l'exportation des résultats en format TXT.
+   Transformation de ce script en .exe en utilisant iexpress natif à Windows.
+
+2. **Fichier d'Exportation (.txt)** :
+   - Le fichier texte exporté contenant les résultats des recherches AD effectuées via l'interface.
+
+3. **Log d'Exécution** :
+   - logs dans linterface contenant les actions effectuées (recherches, erreurs, exportations, etc.), pour le suivi et la gestion des erreurs.
+
+---
+
+#### **Contraintes et Limites** :
+- **Permissions Active Directory** : L'utilisateur exécutant le script doit avoir les droits nécessaires pour interroger Active Directory.
+- **Compatibilité** : Le script est conçu pour être utilisé sur des machines Windows avec PowerShell installé et le module Active Directory disponible.
+- **Format TXT** : Bien que le format TXT soit simple et accessible, il ne permet pas une analyse aussi poussée que d'autres formats comme CSV ou Excel. 
+
+---
+
+#### **Sécurité et Conformité** :
+- Le script doit être exécuté dans un environnement sécurisé avec les droits d'accès appropriés à Active Directory.
+- Aucune donnée sensible ne doit être incluse dans le script (par exemple, mots de passe ou informations d'identification).
+- Les logs d'exécution peuvent être utilisés pour identifier les erreurs et garantir le bon déroulement des opérations.

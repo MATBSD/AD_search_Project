@@ -1,0 +1,2 @@
+Taper la commande ci contre :
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -NoExit -File "C:\Users\matheo.bensaid\Desktop\cours\2eme année\PROJET_FINAL\Powershell_AD_BASCAN\final_search_ad.ps1"
