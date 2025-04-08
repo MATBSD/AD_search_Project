@@ -1,0 +1,397 @@
+﻿$PSDefaultParameterValues['Out-File:Width'] = 1000
+
+# Dossier de logs
+$logFolder = Join-Path -Path $PSScriptRoot -ChildPath "log"
+if (-not (Test-Path $logFolder)) {
+    New-Item -ItemType Directory -Path $logFolder | Out-Null
+}
+$logFile = Join-Path -Path $logFolder -ChildPath "ad_tool_log.txt"
+
+function Write-Log {
+    param (
+        [string]$Message,
+        [string]$Level = "INFO"
+    )
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "[$timestamp][$Level] $Message"
+    Add-Content -Path $logFile -Value $logEntry
+}
+
+
+
+# Fonction pour sauvegarder de nouveaux identifiants
+function Save-NewCredential {
+    $credential = Get-Credential -Message "Entrez vos identifiants AD"
+    $credential.Password | ConvertFrom-SecureString | Out-File $credPath
+    $credential.UserName | Out-File $userPath
+    Write-Host "Les identifiants ont été enregistrés dans $credPath"
+    return $credential
+}
+
+# Chemin de stockage des identifiants AD
+$credPath = Join-Path -Path $PSScriptRoot -ChildPath "ad_credentials.secure"
+$userPath = Join-Path -Path $PSScriptRoot -ChildPath "ad_username.txt"
+
+# Fonction pour récupérer les identifiants sauvegardés
+function Get-SavedCredential {
+    if ((Test-Path $credPath) -and (Test-Path $userPath)) {
+        $username = Get-Content $userPath
+        $password = Get-Content $credPath | ConvertTo-SecureString
+        return New-Object System.Management.Automation.PSCredential ($username, $password)
+    } else {
+        Write-Host "Aucun identifiant enregistré. Veuillez entrer vos identifiants AD."
+        return Save-NewCredential
+    }
+}
+
+# Charger automatiquement les credentials
+$global:ADCredential = Get-SavedCredential
+
+function Export-Results {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [Parameter(Mandatory = $true)]
+        [array]$Results
+    )
+    
+    $extension = [System.IO.Path]::GetExtension($FilePath).ToLower()
+
+    if ($extension -eq ".txt") {
+        $Results | Out-File -FilePath $FilePath -Force
+        Write-Host "Les résultats ont été exportés vers $FilePath"
+    } else {
+        Write-Host "Extension de fichier non prise en charge. Utilisez .txt."
+    }
+}
+
+function ShowInputBox {
+    param(
+        [string]$Message,
+        [string]$Title
+    )
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    [Microsoft.VisualBasic.Interaction]::InputBox($Message, $Title, "")
+}
+
+function finduserad {
+    param(
+        [string]$fonctionuserad,
+        [System.Windows.Forms.TextBox]$resultTextBox
+    )
+
+    $accounts = Get-ADUser -Credential $global:ADCredential -Server BTSSIOBASCAN.local -Properties description, mail -Filter {SamAccountName -eq $fonctionuserad}
+
+    if (-not $accounts) {
+        $resultTextBox.Text = "Erreur : Aucun utilisateur trouvé avec le SamAccountName '$fonctionuserad'."
+        Write-Log "Aucun utilisateur trouvé avec le SamAccountName '$fonctionuserad'." -Level "WARNING"
+        return
+    }
+
+    $results = @()
+
+    foreach ($account in $accounts) {
+        $memberOf = Get-ADUser $account -Properties MemberOf |
+                    Select-Object -ExpandProperty MemberOf |
+                    ForEach-Object { ($_ -split ',')[0] -replace 'CN=' }
+
+        Write-Log "Utilisateur trouvé : $($account.SamAccountName), Groupes : $($memberOf -join ', ')"
+
+        $results += [PSCustomObject]@{
+            Name           = $account.Name
+            SamAccountName = $account.SamAccountName
+            Mail           = $account.Mail
+            Groups         = $memberOf -join "; "
+        }
+    }
+
+    $resultsText = $results | Format-Table -AutoSize | Out-String
+    $resultTextBox.Text = $resultsText
+}
+
+
+function findgroupad {
+    param(
+        [string]$fonctiongroupad,
+        [System.Windows.Forms.TextBox]$resultTextBox
+    )
+
+    $groups = Get-ADGroup -Credential $global:ADCredential -Server BTSSIOBASCAN.local -Filter {Name -like $fonctiongroupad}
+
+    if (-not $groups) {
+        $resultTextBox.Text = "Erreur : Aucun groupe trouvé avec le nom correspondant à '$fonctiongroupad'."
+        Write-Log "Aucun groupe trouvé pour '$fonctiongroupad'." -Level "WARNING"
+        return
+    }
+
+    $results = @()
+
+    foreach ($group in $groups) {
+        $members = Get-ADGroupMember -Identity $group |
+                   Select-Object -ExpandProperty Name
+
+        Write-Log "Groupe trouvé : $($group.Name), Membres : $($members -join ', ')"
+
+        $results += [PSCustomObject]@{
+            GroupName = $group.Name
+            Members   = $members -join "; "
+        }
+    }
+
+    $resultsText = $results | Format-Table -AutoSize | Out-String
+    $resultTextBox.Text = $resultsText
+}
+
+
+function findexpirpwd {
+    param(
+        [string]$fonctionexpirpwd,
+        [System.Windows.Forms.TextBox]$resultTextBox
+    )
+
+    $user = Get-ADUser -Credential $global:ADCredential -Identity $fonctionexpirpwd -Properties "msDS-UserPasswordExpiryTimeComputed"
+    if (-not $user) {
+        $resultTextBox.Text = "Utilisateur $fonctionexpirpwd introuvable."
+        Write-Log "Utilisateur $fonctionexpirpwd introuvable." -Level "WARNING"
+        return
+    }
+
+    if ($user."msDS-UserPasswordExpiryTimeComputed") {
+        $expiryDate = [datetime]::FromFileTime($user."msDS-UserPasswordExpiryTimeComputed")
+
+        $result = [PSCustomObject]@{
+            User           = $user.SamAccountName
+            DisplayName    = $user.DisplayName
+            PasswordExpiry = $expiryDate
+        }
+
+        Write-Log "Expiration du mot de passe de $($user.SamAccountName) : $expiryDate"
+
+        $resultsText = $result | Format-Table -AutoSize | Out-String
+        $resultTextBox.Text = $resultsText
+    } else {
+        $resultTextBox.Text = "La date d'expiration du mot de passe n'est pas définie pour l'utilisateur $fonctionexpirpwd."
+        Write-Log "Date d'expiration non définie pour $fonctionexpirpwd." -Level "WARNING"
+    }
+}
+
+function FindInactiveUsers {
+    param(
+        [int]$DaysInactive = 30,
+        [System.Windows.Forms.TextBox]$resultTextBox
+    )
+
+    $thresholdDate = (Get-Date).AddDays(-$DaysInactive).ToFileTime()
+
+    $inactiveUsers = Get-ADUser -Credential $global:ADCredential -Filter {LastLogonTimestamp -lt $thresholdDate} -Properties LastLogonTimestamp |
+                     ForEach-Object {
+                         [PSCustomObject]@{
+                             Name           = $_.Name
+                             SamAccountName = $_.SamAccountName
+                             LastLogonDate  = if ($_.LastLogonTimestamp) {
+                                 [datetime]::FromFileTime($_.LastLogonTimestamp)
+                             } else {
+                                 "Jamais"
+                             }
+                         }
+                     }
+
+    Write-Log "Utilisateurs inactifs depuis plus de $DaysInactive jours trouvés : $($inactiveUsers.Count)"
+
+    $resultsText = $inactiveUsers | Format-Table -AutoSize | Out-String
+    $resultTextBox.Text = $resultsText
+}
+
+function FindComputers {
+    param(
+        [string]$ComputerName,
+        [System.Windows.Forms.TextBox]$resultTextBox
+    )
+
+    # Ajouter un log avant de commencer la recherche
+    Write-Log "Démarrage de la recherche pour l'ordinateur '$ComputerName'" -Level "INFO"
+
+    try {
+        # Récupérer l'ordinateur via Get-ADComputer
+        $computer = Get-ADComputer -Credential $global:ADCredential -Identity $ComputerName -Properties *
+
+        if (-not $computer) {
+            $resultTextBox.Text = "Erreur : Aucun ordinateur trouvé avec le nom '$ComputerName'."
+            Write-Log "Aucun ordinateur trouvé avec le nom '$ComputerName'." -Level "WARNING"
+            return
+        }
+
+        # Créer un objet avec les informations de l'ordinateur
+        $result = [PSCustomObject]@{
+            Name             = $computer.Name
+            DNSHostName      = $computer.DNSHostName
+            OperatingSystem  = $computer.OperatingSystem
+            LastLogonDate    = if ($computer.LastLogonDate) { $computer.LastLogonDate } else { "Inconnu" }
+            Enabled          = $computer.Enabled
+            DistinguishedName = $computer.DistinguishedName
+        }
+
+        # Log détaillant les informations de l'ordinateur trouvé
+        Write-Log "Ordinateur trouvé : $($computer.Name), OS : $($computer.OperatingSystem), DNS : $($computer.DNSHostName)" -Level "INFO"
+
+        # Formater et afficher les résultats
+        $resultsText = $result | Format-Table -AutoSize | Out-String
+        $resultTextBox.Text = $resultsText
+    }
+    catch {
+        # Gérer l'erreur en cas de problème
+        $resultTextBox.Text = "Erreur lors de la recherche de l'ordinateur : $_"
+        Write-Log "Erreur lors de la recherche de l'ordinateur : $_" -Level "ERROR"
+    }
+}
+
+
+function FindUsersWithNonExpiringPasswords {
+    param(
+        [System.Windows.Forms.TextBox]$resultTextBox
+    )
+
+    try {
+        $users = Get-ADUser -Credential $global:ADCredential -Filter * -Properties DisplayName, PasswordNeverExpires
+        $filteredUsers = $users | Where-Object { $_.PasswordNeverExpires -eq $true } | 
+                         Select-Object DisplayName, SamAccountName, PasswordNeverExpires
+
+        if ($filteredUsers.Count -eq 0) {
+            $resultTextBox.Text = "Aucun utilisateur avec mot de passe non expirant."
+            Write-Log "Aucun utilisateur avec mot de passe non expirant trouvé."
+            return
+        }
+
+        $resultsText = $filteredUsers | Format-Table -AutoSize | Out-String
+        $resultTextBox.Text = $resultsText
+
+        Write-Log "Utilisateurs avec mot de passe non expirant trouvés : $($filteredUsers.Count)"
+    }
+    catch {
+        $resultTextBox.Text = "Erreur lors de la récupération des utilisateurs : $_"
+        Write-Log "Erreur lors de la récupération des utilisateurs non expirants : $_" -Level "ERROR"
+    }
+}
+
+
+function ad_group_search {
+    param(
+        [System.Windows.Forms.TextBox]$resultTextBox
+    )
+
+    try {
+        $groups = Get-ADGroup -Credential $global:ADCredential -Server BTSSIOBASCAN.local -Filter *
+
+        if (-not $groups) {
+            $resultTextBox.Text = "Erreur : Aucun groupe trouvé dans l'Active Directory."
+            Write-Log "Aucun groupe trouvé dans l'Active Directory." -Level "WARNING"
+            return
+        }
+
+        $groupNames = $groups | Select-Object -ExpandProperty Name
+        $resultsText = $groupNames -join ", "
+        $resultTextBox.Text = $resultsText
+
+        Write-Log "Nombre de groupes trouvés : $($groupNames.Count)"
+    }
+    catch {
+        $resultTextBox.Text = "Erreur lors de la récupération des groupes : $_"
+        Write-Log "Erreur lors de la récupération des groupes : $_" -Level "ERROR"
+    }
+}
+
+
+# Interface graphique complète
+Add-Type -AssemblyName System.Windows.Forms
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Menu Active Directory"
+$form.Size = New-Object System.Drawing.Size(1280, 720)
+
+$resultTextBox = New-Object System.Windows.Forms.TextBox
+$resultTextBox.Multiline = $true
+$resultTextBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+$resultTextBox.Size = New-Object System.Drawing.Size(1200, 400)
+$resultTextBox.Location = New-Object System.Drawing.Point(20, 20)
+$form.Controls.Add($resultTextBox)
+
+# Boutons des fonctionnalités
+function AddButton {
+    param(
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [scriptblock]$Action
+    )
+    $button = New-Object System.Windows.Forms.Button
+    $button.Text = $Text
+    $button.Size = New-Object System.Drawing.Size(350, 40)
+    $button.Location = New-Object System.Drawing.Point($X, $Y)
+    $button.BackColor = [System.Drawing.Color]::LightGreen
+    $button.Add_Click($Action)
+    $form.Controls.Add($button)
+}
+
+AddButton "1 - Recherche User AD" 20 450 { 
+    $user = ShowInputBox "Entrez le nom du compte utilisateur" "Recherche Utilisateur"
+    if ($user) { finduserad -fonctionuserad $user -resultTextBox $resultTextBox }
+}
+
+AddButton "2 - Recherche Group AD" 20 500 { 
+    $group = ShowInputBox "Entrez le nom du groupe" "Recherche Groupe"
+    if ($group) { findgroupad -fonctiongroupad $group -resultTextBox $resultTextBox }
+}
+
+AddButton "3 - Recherche Expiration Mot de Passe" 20 550 { 
+    $user = ShowInputBox "Entrez le nom de l'utilisateur" "Expiration Mot de Passe"
+    if ($user) { findexpirpwd -fonctionexpirpwd $user -resultTextBox $resultTextBox }
+}
+
+AddButton "4 - Recherche Utilisateurs Inactifs" 20 600 { 
+    FindInactiveUsers -DaysInactive 30 -resultTextBox $resultTextBox
+}
+
+AddButton "5 - Recherche Ordinateur" 400 450 { 
+    $computer = ShowInputBox "Entrez le nom de l'ordinateur ou ALL pour tous les pc" "Recherche Ordinateur"
+    if ($computer) { FindComputers -ComputerName $computer -resultTextBox $resultTextBox }
+}
+
+AddButton "6 - Recherche Comptes Sans Expiration" 400 500 { 
+    FindUsersWithNonExpiringPasswords -resultTextBox $resultTextBox
+}
+
+AddButton "7 - Liste Groupes AD" 400 550 { 
+    ad_group_search -resultTextBox $resultTextBox
+}
+
+# Ajouter un bouton Quitter
+$buttonQuit = New-Object System.Windows.Forms.Button
+$buttonQuit.Text = "Quitter"
+$buttonQuit.Size = New-Object System.Drawing.Size(350, 40)
+$buttonQuit.Location = New-Object System.Drawing.Point(850, 600)
+$buttonQuit.BackColor = [System.Drawing.Color]::PaleVioletRed
+$buttonQuit.Add_Click({
+    Clear-Host
+    $form.Close()
+})
+
+# Ajouter un bouton pour exporter les résultats
+$buttonExport = New-Object System.Windows.Forms.Button
+$buttonExport.Text = "Exporter les Résultats"
+$buttonExport.Size = New-Object System.Drawing.Size(350, 40)
+$buttonExport.Location = New-Object System.Drawing.Point(850, 500)
+$buttonExport.BackColor = [System.Drawing.Color]::LightBlue
+$buttonExport.Add_Click({
+    $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
+    $saveFileDialog.Filter = "Text Files (*.txt)|*.txt"
+    $saveFileDialog.ShowDialog()
+    
+    if ($saveFileDialog.FileName) {
+        Export-Results -FilePath $saveFileDialog.FileName -Results $resultTextBox.Text
+    }
+})
+$form.Controls.Add($buttonExport)
+$form.Controls.Add($buttonQuit)
+
+$form.ShowDialog()
